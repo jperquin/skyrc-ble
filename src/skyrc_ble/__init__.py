@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-__version__ = "2.1.0"
+__version__ = "2.2.0"
 
 from .const import (
     MC3000_BLUETOOTH_NAMES,
@@ -10,6 +10,7 @@ from .const import (
 )
 from .device import SkyRcDevice
 from .mc3000 import Mc3000, Mc3000BasicData, Mc3000ChannelData, Mc3000State
+from .models import Mc3000VoltageCurveData
 
 __all__ = [
     "SkyRcDevice",
@@ -21,4 +22,5 @@ __all__ = [
     "Mc3000BasicData",
     "Mc3000ChannelData",
     "Mc3000State",
+    "Mc3000VoltageCurveData",
 ]

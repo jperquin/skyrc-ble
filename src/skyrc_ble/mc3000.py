@@ -20,6 +20,7 @@ from .models import (
     Mc3000BasicData,
     Mc3000ChannelData,
     Mc3000State,
+    Mc3000VoltageCurveData,
     TemperatureUnit,
 )
 
@@ -46,6 +47,7 @@ class Mc3000(SkyRcDevice[Mc3000State]):
         super().__init__(ble_device)
 
         self._state = Mc3000State()
+        self._voltage_curve_chunks: list[bytes] | None = None
 
     async def connect(self) -> bool:
         """Connect to the device."""
@@ -70,6 +72,73 @@ class Mc3000(SkyRcDevice[Mc3000State]):
         except BleakError as error:
             if self.is_connected:
                 raise error
+
+    async def get_voltage_curve_data(self, channel: int) -> Mc3000VoltageCurveData:
+        """Return voltage curve data for the specified channel.
+
+        The MC3000 returns command 0x56 as a 246-byte frame split across
+        multiple BLE notifications, usually 12 x 20 bytes + 1 x 6 bytes.
+        """
+        if channel not in range(0, MC3000_CHANNEL_COUNT):
+            raise ValueError("Invalid channel")
+
+        self._voltage_curve_chunks = []
+
+        try:
+            await self._send_packet(CMD_GET_VOLTAGE_CURVE, [channel])
+            raw = b"".join(self._voltage_curve_chunks or [])
+        finally:
+            self._voltage_curve_chunks = None
+
+        if len(raw) < 246:
+            raise BleakError(
+                f"Incomplete voltage curve response: got {len(raw)} bytes, expected 246"
+            )
+
+        frame = raw[:246]
+
+        if frame[0] != PACKET_MAGIC:
+            raise BleakError("Voltage curve frame does not start with magic number")
+
+        if frame[1] != CMD_GET_VOLTAGE_CURVE:
+            raise BleakError(f"Unexpected voltage curve command byte: 0x{frame[1]:02x}")
+
+        if frame[2] != channel:
+            raise BleakError(
+                f"Voltage curve channel mismatch: got {frame[2]}, expected {channel}"
+            )
+
+        checksum = sum(frame[:-1]) & 0xFF
+        checksum_ok = frame[-1] == checksum
+        if not checksum_ok:
+            raise BleakError(
+                f"Voltage curve checksum mismatch: got 0x{frame[-1]:02x}, expected 0x{checksum:02x}"
+            )
+
+        sample_bytes = frame[5:-1]
+        if len(sample_bytes) != 240:
+            raise BleakError(
+                f"Unexpected voltage curve sample byte length: {len(sample_bytes)}"
+            )
+
+        samples_mv = [
+            int.from_bytes(sample_bytes[i : i + 2], "big")
+            for i in range(0, len(sample_bytes), 2)
+        ]
+
+        return Mc3000VoltageCurveData(
+            channel=frame[2],
+            unknown_3=frame[3],
+            interval_seconds=frame[4],
+            samples_mv=samples_mv,
+            checksum_ok=checksum_ok,
+            raw_frame=frame,
+        )
+
+    async def get_voltage_curve(self, channel: int) -> list[int]:
+        """Return voltage curve samples for the specified channel in millivolts."""
+        curve = await self.get_voltage_curve_data(channel)
+        return curve.samples_mv
 
     async def start_charge(self, channel: int) -> None:
         """Start charging the battery in the specified channel."""
@@ -126,6 +195,32 @@ class Mc3000(SkyRcDevice[Mc3000State]):
         self, sender: BleakGATTCharacteristic, packet: bytearray
     ) -> None:
         """Handle a GATT notification."""
+        if self._voltage_curve_chunks is not None:
+            packet_bytes = bytes(packet)
+
+            if not self._voltage_curve_chunks:
+                if (
+                    len(packet_bytes) >= 2
+                    and packet_bytes[0] == PACKET_MAGIC
+                    and packet_bytes[1] == CMD_GET_VOLTAGE_CURVE
+                ):
+                    self._voltage_curve_chunks.append(packet_bytes)
+                    if len(packet_bytes) >= 246:
+                        self._packet_received.set()
+                    return
+
+                await self._parse_packet(packet)
+                self._packet_received.set()
+                return
+
+            self._voltage_curve_chunks.append(packet_bytes)
+            raw = b"".join(self._voltage_curve_chunks)
+
+            if len(raw) >= 246:
+                self._packet_received.set()
+
+            return
+
         await self._parse_packet(packet)
         self._packet_received.set()
 

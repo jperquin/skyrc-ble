@@ -118,3 +118,15 @@ class Mc3000State:
     channels: list[Mc3000ChannelData | None] = field(
         default_factory=lambda: [None for _ in range(MC3000_CHANNEL_COUNT)]
     )
+
+@dataclass(frozen=True)
+class Mc3000VoltageCurveData:
+    """MC3000 voltage curve data."""
+
+    channel: int = 0
+    unknown_3: int = 0
+    interval_seconds: int = 0
+    samples_mv: list[int] = field(default_factory=list)
+    checksum_ok: bool = False
+    raw_frame: bytes = b""
+
