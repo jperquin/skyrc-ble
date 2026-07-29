@@ -10,7 +10,7 @@ from .const import (
 )
 from .device import SkyRcDevice
 from .mc3000 import Mc3000, Mc3000BasicData, Mc3000ChannelData, Mc3000State
-from .models import Mc3000VoltageCurveData
+from .models import Mc3000Program, Mc3000VoltageCurveData
 
 __all__ = [
     "SkyRcDevice",
@@ -22,5 +22,6 @@ __all__ = [
     "Mc3000BasicData",
     "Mc3000ChannelData",
     "Mc3000State",
+    "Mc3000Program",
     "Mc3000VoltageCurveData",
 ]

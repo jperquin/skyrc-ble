@@ -5,6 +5,23 @@ This page documents the BLE (Bluetooth Low Energy) protocol used by `SkyRC MC300
 
 It is based on analyzing sniffed Bluetooth traffic and decompilation of the official `SkyRC MC3000 Android app <https://play.google.com/store/apps/details?id=com.Sky_mc3000>`_.
 
+Work program upload (0x11)
+--------------------------
+
+A complete work program is sent as two 20-byte writes to FFE1 using write
+without response. The official app waits 50 milliseconds between the writes.
+The final byte of the second frame is a cumulative checksum over the first 20
+bytes and the first 19 bytes of the second frame.
+
+The channel field is a bitmask: 0x01, 0x02, 0x04 and 0x08 select slots 1-4.
+The charger returns a 0x11 acknowledgement after accepting both frames.
+
+Starting a program (0x05)
+-------------------------
+
+The start command uses the same channel bitmask as the program upload. It does
+not use a zero-based channel index on the wire.
+
 
 Device Identification
 =====================

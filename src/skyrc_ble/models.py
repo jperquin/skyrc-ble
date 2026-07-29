@@ -119,6 +119,36 @@ class Mc3000State:
         default_factory=lambda: [None for _ in range(MC3000_CHANNEL_COUNT)]
     )
 
+
+@dataclass(frozen=True)
+class Mc3000Program:
+    """Complete MC3000 work program.
+
+    The charger protocol does not support changing only the chemistry. A complete
+    program must always be uploaded, including all current, voltage and protection
+    settings.
+    """
+
+    battery_type: BatteryType
+    operation: ChannelMode
+    capacity: int
+    charge_current: float
+    discharge_current: float
+    charge_voltage: int
+    discharge_voltage: int
+    charge_end_current: int
+    discharge_end_current: int
+    cycle_time: int = 0
+    cycle_count: int = 1
+    cycle_type: int = 0
+    delta_v: int = 0
+    trickle_current: int = 0
+    maintenance_voltage: int = 0
+    protection_temperature: int = 0
+    protection_time: int = 0
+    discharge_time: int = 0
+
+
 @dataclass(frozen=True)
 class Mc3000VoltageCurveData:
     """MC3000 voltage curve data."""
@@ -129,4 +159,3 @@ class Mc3000VoltageCurveData:
     samples_mv: list[int] = field(default_factory=list)
     checksum_ok: bool = False
     raw_frame: bytes = b""
-

@@ -19,6 +19,7 @@ from .models import (
     LedColor,
     Mc3000BasicData,
     Mc3000ChannelData,
+    Mc3000Program,
     Mc3000State,
     Mc3000VoltageCurveData,
     TemperatureUnit,
@@ -34,6 +35,10 @@ CMD_GET_VERSION_INFO = 0x57
 CMD_GET_BASIC_DATA = 0x61
 CMD_START_CHARGE = 0x05
 CMD_STOP_CHARGE = 0xFE
+CMD_SET_WORK_PROGRAM = 0x11
+
+WORK_PROGRAM_FRAME_SIZE = 20
+WORK_PROGRAM_INTERFRAME_DELAY = 0.05
 
 STRUCT_GET_CHANNEL_DATA = Struct(">BBBBBHHHHBHB")
 STRUCT_GET_VERSION_INFO = Struct(">xxxxxxxxxxxxBBB")
@@ -48,6 +53,8 @@ class Mc3000(SkyRcDevice[Mc3000State]):
 
         self._state = Mc3000State()
         self._voltage_curve_chunks: list[bytes] | None = None
+        self._last_packet: bytes | None = None
+        self._expected_response_command: int | None = None
 
     async def connect(self) -> bool:
         """Connect to the device."""
@@ -155,6 +162,60 @@ class Mc3000(SkyRcDevice[Mc3000State]):
             raise ValueError("Invalid channels")
         await self._send_packet(CMD_START_CHARGE, [channels])
 
+    async def write_program(self, channel: int, program: Mc3000Program) -> None:
+        """Upload a complete work program to one channel.
+
+        The MC3000 expects two 20-byte writes separated by 50 milliseconds.
+        The checksum in the last byte of the second frame is cumulative over
+        both frames.
+        """
+        if channel not in range(0, MC3000_CHANNEL_COUNT):
+            raise ValueError("Invalid channel")
+        await self.write_program_multi(1 << channel, program)
+
+    async def write_program_multi(self, channels: int, program: Mc3000Program) -> None:
+        """Upload a complete work program to channels selected by a bitfield."""
+        if channels not in range(1, 1 << MC3000_CHANNEL_COUNT):
+            raise ValueError("Invalid channels")
+
+        first_frame, second_frame = self._build_work_program_frames(channels, program)
+
+        _LOGGER.debug(
+            "%s: Sending work program frames: %s / %s",
+            self.name,
+            first_frame.hex(),
+            second_frame.hex(),
+        )
+
+        async with self._client_lock:
+            self._last_packet = None
+            self._expected_response_command = CMD_SET_WORK_PROGRAM
+            self._packet_received.clear()
+            try:
+                await self._client.write_gatt_char(
+                    MC3000_CHARACTERISTIC_UUID, first_frame, response=False
+                )
+                await asyncio.sleep(WORK_PROGRAM_INTERFRAME_DELAY)
+                await self._client.write_gatt_char(
+                    MC3000_CHARACTERISTIC_UUID, second_frame, response=False
+                )
+
+                try:
+                    await asyncio.wait_for(self._packet_received.wait(), 2)
+                except TimeoutError as error:
+                    raise BleakError(
+                        "Timeout waiting for MC3000 work program acknowledgement"
+                    ) from error
+            finally:
+                self._expected_response_command = None
+
+            if (
+                self._last_packet is None
+                or len(self._last_packet) < 2
+                or self._last_packet[1] != CMD_SET_WORK_PROGRAM
+            ):
+                raise BleakError("Unexpected MC3000 work program response")
+
     async def stop_charge(self, channel: int) -> None:
         """Stop charging the battery in the specified channel."""
         if channel not in range(0, MC3000_CHANNEL_COUNT):
@@ -170,10 +231,13 @@ class Mc3000(SkyRcDevice[Mc3000State]):
             raise ValueError("Invalid channels")
         await self._send_packet(CMD_STOP_CHARGE, [channels])
 
-    async def _send_packet(self, command: int, payload: list[int] = []) -> None:
+    async def _send_packet(
+        self, command: int, payload: list[int] | None = None
+    ) -> None:
         """Send a packet to the device."""
 
         # Pad payload with zeros
+        payload = payload or []
         payload = payload + [0] * (17 - len(payload))
 
         # Format packet and calculate checksum
@@ -184,17 +248,94 @@ class Mc3000(SkyRcDevice[Mc3000State]):
         # Send packet and wait for response
         _LOGGER.debug("%s: Sending packet: %s", self.name, packet_bytes.hex())
         async with self._client_lock:
+            self._expected_response_command = command
             self._packet_received.clear()
-            await self._client.write_gatt_char(MC3000_CHARACTERISTIC_UUID, packet_bytes)
             try:
-                await asyncio.wait_for(self._packet_received.wait(), 2)
-            except TimeoutError:
-                _LOGGER.warn("%s: Timeout waiting for response notification")
+                await self._client.write_gatt_char(
+                    MC3000_CHARACTERISTIC_UUID, packet_bytes
+                )
+                try:
+                    await asyncio.wait_for(self._packet_received.wait(), 2)
+                except TimeoutError:
+                    _LOGGER.warning("%s: Timeout waiting for response notification")
+            finally:
+                self._expected_response_command = None
+
+    @staticmethod
+    def _build_work_program_frames(
+        channels: int, program: Mc3000Program
+    ) -> tuple[bytes, bytes]:
+        """Serialize a work program using the official MC3000 app protocol."""
+
+        def u8(name: str, value: int) -> int:
+            if not 0 <= value <= 0xFF:
+                raise ValueError(f"{name} must fit in one byte")
+            return value
+
+        def u16(name: str, value: int) -> list[int]:
+            if not 0 <= value <= 0xFFFF:
+                raise ValueError(f"{name} must fit in two bytes")
+            return [value >> 8, value & 0xFF]
+
+        def current(name: str, value: float) -> list[int]:
+            scaled = round(value * 1000)
+            if abs(value * 1000 - scaled) > 1e-6:
+                raise ValueError(f"{name} must use 0.001 A increments")
+            return u16(name, scaled)
+
+        if not isinstance(program.battery_type, BatteryType):
+            raise ValueError("battery_type must be a BatteryType")
+        if not isinstance(program.operation, ChannelMode):
+            raise ValueError("operation must be a ChannelMode")
+        if program.trickle_current % 10:
+            raise ValueError("trickle_current must use 10 mA increments")
+
+        first = bytearray(
+            [
+                PACKET_MAGIC,
+                CMD_SET_WORK_PROGRAM,
+                channels,
+                int(program.battery_type),
+                int(program.operation),
+                *u16("capacity", program.capacity),
+                *current("charge_current", program.charge_current),
+                *current("discharge_current", program.discharge_current),
+                *u16("charge_voltage", program.charge_voltage),
+                *u16("discharge_voltage", program.discharge_voltage),
+                *u16("charge_end_current", program.charge_end_current),
+                *u16("discharge_end_current", program.discharge_end_current),
+                u8("cycle_time", program.cycle_time),
+            ]
+        )
+
+        second = bytearray(
+            [
+                u8("cycle_count", program.cycle_count),
+                u8("cycle_type", program.cycle_type),
+                u8("delta_v", program.delta_v),
+                u8("trickle_current", program.trickle_current // 10),
+                *u16("maintenance_voltage", program.maintenance_voltage),
+                u8("protection_temperature", program.protection_temperature),
+                *u16("protection_time", program.protection_time),
+                u8("discharge_time", program.discharge_time),
+                *([0] * 9),
+                0,
+            ]
+        )
+
+        if len(first) != WORK_PROGRAM_FRAME_SIZE:
+            raise AssertionError("Invalid first work program frame size")
+        if len(second) != WORK_PROGRAM_FRAME_SIZE:
+            raise AssertionError("Invalid second work program frame size")
+
+        second[-1] = (sum(first) + sum(second[:-1])) & 0xFF
+        return bytes(first), bytes(second)
 
     async def _notification_callback(
         self, sender: BleakGATTCharacteristic, packet: bytearray
     ) -> None:
         """Handle a GATT notification."""
+        self._last_packet = bytes(packet)
         if self._voltage_curve_chunks is not None:
             packet_bytes = bytes(packet)
 
@@ -222,7 +363,8 @@ class Mc3000(SkyRcDevice[Mc3000State]):
             return
 
         await self._parse_packet(packet)
-        self._packet_received.set()
+        if len(packet) >= 2 and packet[1] == self._expected_response_command:
+            self._packet_received.set()
 
     async def _parse_packet(self, packet: bytearray) -> None:
         """Parse single-packet messages and update the data model.

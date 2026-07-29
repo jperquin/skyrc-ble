@@ -11,6 +11,7 @@ from skyrc_ble.mc3000 import (
     CMD_GET_BASIC_DATA,
     CMD_GET_CHANNEL_DATA,
     CMD_GET_VERSION_INFO,
+    CMD_SET_WORK_PROGRAM,
     CMD_START_CHARGE,
     CMD_STOP_CHARGE,
 )
@@ -22,6 +23,8 @@ class MockMc3000BleakClient:
     def __init__(self, *args, **kwargs):
         """Mock BleakClient."""
         self.packets_sent: int = 0
+        self.sent_data: list[bytes] = []
+        self._work_program_pending = False
 
     async def connect(self, *args, **kwargs):
         """Mock BleakClient.connect."""
@@ -47,7 +50,16 @@ class MockMc3000BleakClient:
     ) -> None:
         """Mock BleakClient.write_gatt_char."""
 
-        if data[1] == CMD_GET_VERSION_INFO:
+        self.sent_data.append(bytes(data))
+
+        if data[1] == CMD_SET_WORK_PROGRAM:
+            self._work_program_pending = True
+            self.packets_sent += 1
+            return
+        elif self._work_program_pending:
+            self._work_program_pending = False
+            value = bytearray.fromhex("0f1101f0ffff000000000000000000000000000f")
+        elif data[1] == CMD_GET_VERSION_INFO:
             value = bytearray.fromhex("0f57003130303038330100000000010f1600adfc")
         elif data[1] == CMD_GET_BASIC_DATA:
             value = bytearray.fromhex("0f6100000200002af80000000000000000000094")
