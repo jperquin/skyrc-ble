@@ -1,5 +1,18 @@
 # Changelog
 
+## v3.0.0 (2026-07-29)
+
+### Breaking
+
+- Require a complete validated work profile for MC3000 program writes.
+- Use protocol channel bitmasks consistently for program and start/stop commands.
+
+### Feature
+
+- Add safe two-frame `0x11` work-program uploads with a 50 ms inter-frame
+  delay, write-without-response semantics and a cumulative checksum.
+- Add MC3000 voltage-curve data support.
+
 ## v2.1.0 (2023-11-08)
 
 ### Feature

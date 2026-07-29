@@ -7,7 +7,7 @@
 project = "SkyRC BLE"
 copyright = "2023, Stefan Rado"
 author = "Stefan Rado"
-release = "2.1.0"
+release = "3.0.0"
 
 # General configuration
 extensions = [
