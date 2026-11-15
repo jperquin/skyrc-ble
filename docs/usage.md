@@ -36,6 +36,31 @@ await mc3000.write_program(0, program)
 await mc3000.start_charge(0)
 ```
 
+## MC5000
+
+The MC5000 uses its own `Mc5000` class. Sending a program starts it right away,
+so there is no separate start call. Channels are indexed 0-3.
+
+```python
+from skyrc_ble import Mc5000, Mc5000BatteryType, Mc5000Operation, Mc5000Program
+
+mc5000 = Mc5000(ble_device)  # advertised name starts with "#Charger"
+await mc5000.update()
+print(mc5000.state.channels[0])
+
+program = Mc5000Program(
+    battery_type=Mc5000BatteryType.NIMH,
+    operation=Mc5000Operation.CHARGE,
+    capacity=2000,
+    charge_current=0.3,
+    discharge_current=0.5,
+    charge_voltage=1650,
+    discharge_voltage=900,
+)
+await mc5000.start_program(0, program)
+await mc5000.stop_charge(0)
+```
+
 ## Example code
 
 ```{eval-rst}
