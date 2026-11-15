@@ -255,12 +255,17 @@ class Mc5000(SkyRcDevice[Mc5000State]):
         """Send one frame and wait for the response with the same command byte."""
         frame = build_frame(command, payload)
         _LOGGER.debug("%s: Sending packet: %s", self.name, frame.hex())
+        if self._client is None:
+            raise BleakError(f"{self.name}: not connected")
         async with self._client_lock:
+            client = self._client
+            if client is None:
+                raise BleakError(f"{self.name}: disconnected")
             self._expected_response_command = command
             self._last_response = None
             self._packet_received.clear()
             try:
-                await self._client.write_gatt_char(
+                await client.write_gatt_char(
                     MC3000_CHARACTERISTIC_UUID, frame, response=False
                 )
                 try:

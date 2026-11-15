@@ -139,3 +139,13 @@ async def test_mc5000_rejects_invalid_channels(mock_mc5000_bleak):
         await mc5000.start_program(4, NIMH_CHARGE_300MA)
     with pytest.raises(ValueError):
         await mc5000.stop_charge_multi(0x10)
+
+
+@pytest.mark.asyncio
+async def test_mc5000_request_after_disconnect_raises_bleak_error(mock_mc5000_bleak):
+    from bleak.exc import BleakError
+
+    mc5000 = await _connected()
+    mc5000._client = None  # what the disconnected callback does
+    with pytest.raises(BleakError):
+        await mc5000.stop_charge(0)
