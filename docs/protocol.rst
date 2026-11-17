@@ -500,3 +500,36 @@ Response
 +------------+--------------------------------------------+------------------------------------+
 | 20         | ``FC``                                     | Checksum (sum of previous bytes)   |
 +------------+--------------------------------------------+------------------------------------+
+
+MC5000
+------
+
+The MC5000 (SK-100214) advertises as ``#Charger-XXXX`` and uses the same GATT
+service ``FFE0`` and characteristic ``FFE1``, but a different, variable-length
+framing:
+
+.. code-block:: text
+
+   0F | LEN | CMD | PAYLOAD... | SUM
+   LEN = len(PAYLOAD) + 2
+   SUM = (CMD + sum(PAYLOAD)) & 0xFF
+
+Channels are a bitmask (channel 1 = ``0x01`` ... channel 4 = ``0x08``; ``0x00``
+means all channels). Frames are written without response, one frame per write
+(the start frame is 44 bytes, so the link needs an MTU above 23). The first frame
+after connecting is answered with ``0F 04 06 01 01 08`` instead of its own reply.
+
++-----------+-----------------------+-------------------------------------------------+
+| Command   | Payload               | Response                                        |
++===========+=======================+=================================================+
+| ``0x91``  | channel mask          | channel data (V, I, mAh, time, IR, status,      |
+|           |                       | mode, error, chemistry)                         |
++-----------+-----------------------+-------------------------------------------------+
+| ``0x94``  | 40-byte work program  | ``0F 04 94 <mask> 01 <sum>``; the program       |
+|           |                       | starts immediately                              |
++-----------+-----------------------+-------------------------------------------------+
+| ``0xFE``  | channel mask          | ``0F 04 FE <mask> 01 <sum>``                    |
++-----------+-----------------------+-------------------------------------------------+
+
+Full byte layouts, chemistry and mode tables, and hardware captures are in
+https://github.com/fisherbln/skyrc-mc5000/blob/main/PROTOCOL.md

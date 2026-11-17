@@ -7,10 +7,20 @@ from .const import (
     MC3000_CHANNEL_COUNT,
     MC3000_CHARACTERISTIC_UUID,
     MC3000_SERVICE_UUID,
+    MC5000_BLUETOOTH_NAME_PREFIX,
 )
 from .device import SkyRcDevice
 from .mc3000 import Mc3000, Mc3000BasicData, Mc3000ChannelData, Mc3000State
-from .models import Mc3000Program, Mc3000VoltageCurveData
+from .mc5000 import Mc5000
+from .models import (
+    Mc3000Program,
+    Mc3000VoltageCurveData,
+    Mc5000BatteryType,
+    Mc5000ChannelData,
+    Mc5000Operation,
+    Mc5000Program,
+    Mc5000State,
+)
 
 __all__ = [
     "SkyRcDevice",
@@ -24,4 +34,11 @@ __all__ = [
     "Mc3000State",
     "Mc3000Program",
     "Mc3000VoltageCurveData",
+    "MC5000_BLUETOOTH_NAME_PREFIX",
+    "Mc5000",
+    "Mc5000BatteryType",
+    "Mc5000ChannelData",
+    "Mc5000Operation",
+    "Mc5000Program",
+    "Mc5000State",
 ]
